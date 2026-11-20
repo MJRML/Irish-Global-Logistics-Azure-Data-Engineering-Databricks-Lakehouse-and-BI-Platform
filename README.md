@@ -3,13 +3,8 @@
 
 An end-to-end Azure data platform demonstrating incremental ingestion, a Databricks medallion lakehouse, data quality, change data capture, and deployment across development and production environments.
 
-![Azure](https://img.shields.io/badge/Azure-Cloud-blue)
-![Azure Data Factory](https://img.shields.io/badge/Azure-Data%20Factory-0078D4)
-![Databricks](https://img.shields.io/badge/Databricks-Lakehouse-EF3E2C)
-![Delta Lake](https://img.shields.io/badge/Delta-Lake-003366)
-![Python](https://img.shields.io/badge/Python-PySpark-3776AB)
 
-**Project:** Portfolio project · **Data:** Synthetic · **Cloud:** Microsoft Azure
+**Focus:** End-to-end data engineering · **Architecture:** Lakehouse · **Cloud:** Microsoft Azure
 
 ---
 
@@ -121,10 +116,49 @@ WHERE modified_date > '@{activity('lookup_deliveries_watermark').output.firstRow
 
 ### Employee working-hours files
 
-- Separate employee-upload Blob Storage input.
-- ADF activity: `copy_driver_working_hours_to_adls`.
+Driver working-hours data follows a separate file-based ingestion path. Employees upload CSV files to the `employee-uploads` Blob Storage container, and ADF copies those files into ADLS Gen2 for Bronze ingestion.
+
+**Pipeline:** `pl_ingest_employee_working_hours`
+
+- Source dataset: `ds_blob_driver_working_hours`.
+- Source uses a wildcard file path with the `*.csv` file filter to select CSV uploads.
+- Copy activity: `copy_driver_working_hours_to_adls`.
+- Sink dataset: `ds_adls_driver_working_hours`.
 - Copy behaviour: **Merge files**.
+- The sink filename is generated dynamically using a timestamp, for example `driver_working_hours_yyyyMMdd_HHmmss.csv`.
 - The landed CSV is ingested by the Bronze working-hours notebook.
+
+![Employee working-hours source settings](screenshots/adf/employee_working_hours_source_settings.png)
+
+*Blob Storage source configuration, including the wildcard CSV file filter.*
+
+![Employee working-hours sink settings](screenshots/adf/employee_working_hours_sink_settings.png)
+
+*ADLS Gen2 sink configuration using Merge files and a parameterised filename.*
+
+![Employee working-hours sink dataset parameters](screenshots/adf/employee_working_hours_sink_dataset_parameters.png)
+
+*The sink dataset exposes `p_file_name` as a string parameter used by the pipeline.*
+
+### ADF triggers
+
+The project uses two trigger types to start its ingestion pipelines:
+
+**Azure SQL — schedule trigger**
+
+`trg_azure_sql_ingestion_schedule` is a `ScheduleTrigger` configured to run the Azure SQL ingestion pipeline every **15 minutes**. Its configured time zone is Abu Dhabi / Muscat (UTC+4).
+
+![Azure SQL schedule trigger](screenshots/adf/azure_sql_schedule_trigger.png)
+
+*Schedule trigger configuration showing its 15-minute recurrence and UTC+4 time zone.*
+
+**Employee uploads — Blob events trigger**
+
+`trg_employee_file_upload` is a `BlobEventsTrigger` configured through the Azure subscription. This provides an event-driven entry point for the employee file-upload pipeline, rather than relying on a polling schedule.
+
+![Employee Blob event trigger](screenshots/adf/employee_blob_event_trigger.png)
+
+*Blob Events trigger configuration for the employee-upload ingestion path.*
 
 ---
 
@@ -278,6 +312,8 @@ The Databricks Asset Bundle is named `global_logistics`. Resource definitions ar
 The `${var.catalog}` variable passes the selected catalog into the deployed jobs and pipelines.
 
 ### End-to-end workflow
+
+The production Databricks workflow is scheduled to run daily at **02:00 UTC**. The DEV target keeps its schedule paused so development runs can be controlled separately. This Databricks schedule is independent of the Azure Data Factory triggers described earlier: ADF starts source ingestion, while the Databricks schedule orchestrates lakehouse processing.
 
 ![DEV workflow dependencies](screenshots/orchestration/dev_workflow_dependencies.png)
 
