@@ -1,0 +1,14 @@
+resources:
+  pipelines:
+    global_logistics_gold_depot_performance:
+      name: global_logistics_gold_depot_performance
+      catalog: ${var.catalog}
+      schema: gold
+      configuration:
+        "global_logistics.catalog": ${var.catalog}
+      serverless: true
+      photon: true
+      root_path: /Workspace/Users/mjryan947@gmail.com/global-logistics-fleet/gold
+      libraries:
+        - notebook:
+            path: /Workspace/Users/mjryan947@gmail.com/global-logistics-fleet/gold/depot_performance

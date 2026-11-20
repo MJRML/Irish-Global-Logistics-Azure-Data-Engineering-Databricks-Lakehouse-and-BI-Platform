@@ -1,0 +1,35 @@
+resources:
+  jobs:
+    bronze_ingestion_job:
+      name: global_logistics_bronze_ingestion
+
+      tasks:
+        - task_key: ingest_deliveries
+          notebook_task:
+            notebook_path: ../src/bronze/azure_sql_db/ingest_deliveries.py
+            base_parameters:
+              catalog: ${var.catalog}
+
+        - task_key: ingest_depots
+          notebook_task:
+            notebook_path: ../src/bronze/azure_sql_db/ingest_depots.py
+            base_parameters:
+              catalog: ${var.catalog}
+        
+        - task_key: ingest_drivers
+          notebook_task:
+            notebook_path: ../src/bronze/azure_sql_db/ingest_drivers.py
+            base_parameters:
+              catalog: ${var.catalog}
+        
+        - task_key: ingest_vehicles
+          notebook_task:
+            notebook_path: ../src/bronze/azure_sql_db/ingest_vehicles.py
+            base_parameters:
+              catalog: ${var.catalog}
+
+        - task_key: ingest_driver_working_hours
+          notebook_task:
+            notebook_path: ../src/bronze/employee_data/ingest_driver_working_hours.py
+            base_parameters:
+              catalog: ${var.catalog}

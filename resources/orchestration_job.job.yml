@@ -1,0 +1,39 @@
+
+resources:
+  jobs:
+    global_logistics_orchestration:
+      name: global_logistics_full_workflow
+
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "UTC"
+        pause_status: ${var.job_schedule_pause_status}
+
+      tasks:
+        - task_key: bronze_ingestion
+          run_job_task:
+            job_id: ${resources.jobs.bronze_ingestion_job.id}
+
+        - task_key: silver_processing
+          depends_on:
+            - task_key: bronze_ingestion
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.global_logistics_silver_pipeline.id}
+
+        - task_key: gold_delivery_performance
+          depends_on:
+            - task_key: silver_processing
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.global_logistics_gold_delivery_performance.id}
+
+        - task_key: gold_depot_performance
+          depends_on:
+            - task_key: silver_processing
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.global_logistics_gold_depot_performance.id}
+
+        - task_key: gold_driver_performance
+          depends_on:
+            - task_key: silver_processing
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.global_logistics_gold_driver_performance.id}

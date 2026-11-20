@@ -1,0 +1,14 @@
+resources:
+  pipelines:
+    global_logistics_silver_pipeline:
+      name: global_logistics_silver_pipeline
+      catalog: ${var.catalog}
+      schema: silver
+      configuration:
+        global_logistics.catalog: ${var.catalog}
+      serverless: true
+      photon: true
+      root_path: /Workspace/Users/mjryan947@gmail.com/global_logistics_silver_pipeline
+      libraries:
+        - glob:
+            include: /Workspace/Users/mjryan947@gmail.com/global_logistics_silver_pipeline/transformations/**

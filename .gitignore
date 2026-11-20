@@ -1,0 +1,25 @@
+# Databricks local configuration and build artifacts
+.databricks/
+build/
+dist/
+
+# Local editor configuration
+.vscode/
+
+# Python
+__pycache__/
+*.egg-info
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Scratch and exploratory work
+scratch/**
+!scratch/README.md
+**/explorations/**
+**/!explorations/README.md
+
