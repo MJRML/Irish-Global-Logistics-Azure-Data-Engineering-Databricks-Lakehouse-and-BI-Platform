@@ -8,7 +8,7 @@ resources:
         "global_logistics.catalog": ${var.catalog}
       serverless: true
       photon: true
-      root_path: /Workspace/Users/mjryan947@gmail.com//global-logistics-fleet/gold
+      root_path: /Workspace/Users/username/global-logistics-fleet/gold
       libraries:
         - notebook:
-            path: /Workspace/Users/mjryan947@gmail.com//global-logistics-fleet/gold/depot_performance
+            path: /Workspace/Users/username/global-logistics-fleet/gold/depot_performance

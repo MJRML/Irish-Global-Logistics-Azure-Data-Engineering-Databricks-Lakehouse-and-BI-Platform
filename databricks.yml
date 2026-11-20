@@ -34,7 +34,7 @@ targets:
     workspace:
       host: https://adb-7405614598924088.8.azuredatabricks.net
       # We explicitly deploy to /Workspace/Users/mjryan947@gmail.com to make sure we only have a single copy.
-      root_path: /Workspace/Users/mjryan947@gmail.com/.bundle/${bundle.name}/${bundle.target}
+      root_path: /Workspace/Users/username/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: logistics_prod
       job_schedule_pause_status: UNPAUSED

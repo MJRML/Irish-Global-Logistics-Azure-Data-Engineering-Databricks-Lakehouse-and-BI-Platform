@@ -8,7 +8,7 @@ resources:
         global_logistics.catalog: ${var.catalog}
       serverless: true
       photon: true
-      root_path: /Workspace/Users/mjryan947@gmail.com/global_logistics_silver_pipeline
+      root_path: /Workspace/Users/username/global_logistics_silver_pipeline
       libraries:
         - glob:
-            include: /Workspace/Users/mjryan947@gmail.com/global_logistics_silver_pipeline/transformations/**
+            include: /Workspace/Users/username/global_logistics_silver_pipeline/transformations/**
