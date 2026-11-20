@@ -30,6 +30,8 @@ The aim was to build a practical end-to-end engineering solution: ingest data in
 
 ## Architecture
 
+![Global Logistics end-to-end architecture](screenshots/architecture/global_logistics_architecture.png)
+
 ```mermaid
 flowchart LR
     SQL["Azure SQL Database<br/>Depots · Vehicles · Drivers · Deliveries"]
