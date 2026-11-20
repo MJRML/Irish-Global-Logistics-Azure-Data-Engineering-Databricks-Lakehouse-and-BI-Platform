@@ -1,178 +1,145 @@
 # Irish Global Logistics
+### Azure Data Engineering | Databricks Lakehouse | DataOps
 
-### Azure Data Engineering · Databricks Lakehouse · DataOps
+An end-to-end Azure data platform demonstrating incremental ingestion, a Databricks medallion lakehouse, data quality, change data capture, and deployment across development and production environments.
 
-An end-to-end data platform built with Azure Data Factory, ADLS Gen2 and
-Azure Databricks. The project demonstrates incremental ingestion,
-medallion architecture, data quality, CDC, environment-aware deployment
-and orchestration using Databricks Asset Bundles.
+![Azure](https://img.shields.io/badge/Azure-Cloud-blue)
+![Azure Data Factory](https://img.shields.io/badge/Azure-Data%20Factory-0078D4)
+![Databricks](https://img.shields.io/badge/Databricks-Lakehouse-EF3E2C)
+![Delta Lake](https://img.shields.io/badge/Delta-Lake-003366)
+![Python](https://img.shields.io/badge/Python-PySpark-3776AB)
 
-**Project type:** Portfolio project · **Data:** Synthetic · **Cloud:**
-Microsoft Azure
+**Project:** Portfolio project · **Data:** Synthetic · **Cloud:** Microsoft Azure
 
-------------------------------------------------------------------------
+---
 
-## At a glance
+## Project overview
 
-  -----------------------------------------------------------------------
-  Area                                Implementation
-  ----------------------------------- -----------------------------------
-  Source ingestion                    Azure SQL Database and
-                                      employee-uploaded CSV files
+This project builds a data platform for a fictional Irish logistics business. Operational data is extracted from Azure SQL Database, while driver working-hours information arrives as employee-uploaded CSV files. Azure Data Factory moves both data sources into Azure Data Lake Storage Gen2, where Azure Databricks processes the data through Bronze, Silver and Gold layers.
 
-  Ingestion orchestration             Azure Data Factory
+The aim was to build a practical end-to-end engineering solution: ingest data incrementally, retain traceability in the lakehouse, apply data-quality controls, manage changes to source records, and publish curated datasets for operational reporting. Databricks Asset Bundles provide repeatable deployment across separate development and production catalogs.
 
-  Data lake                           Azure Data Lake Storage Gen2
+### Platform components
 
-  Processing                          Azure Databricks, PySpark and Delta
-                                      Lake
-
-  Ingestion pattern                   ADF watermark-based extraction and
-                                      Databricks Auto Loader
-
-  Data architecture                   Bronze → Silver → Gold
-
-  Data quality                        Expectations, validation,
-                                      quarantine and deduplication
-
-  Change processing                   Auto CDC / SCD Type 1 for
-                                      applicable Silver datasets
-
-  Deployment                          Databricks Asset Bundles
-
-  Governance                          Unity Catalog with separate DEV and
-                                      PROD catalogs
-  -----------------------------------------------------------------------
-
-------------------------------------------------------------------------
+| Platform area | Technology / approach |
+|---|---|
+| Source systems | Azure SQL Database and employee-uploaded CSV files |
+| Ingestion | Azure Data Factory |
+| Data lake | Azure Data Lake Storage Gen2 |
+| Processing | Azure Databricks, PySpark and Delta Lake |
+| File ingestion | Databricks Auto Loader |
+| Data architecture | Bronze → Silver → Gold |
+| Data quality | Expectations, validation, quarantine and deduplication |
+| Change processing | Auto CDC / SCD Type 1 for applicable Silver datasets |
+| Governance | Unity Catalog |
+| Deployment and orchestration | Databricks Asset Bundles |
 
 ## Architecture
 
-``` mermaid
+```mermaid
 flowchart LR
-    SQL["Azure SQL<br/>4 operational tables"]
-    FILES["Employee-uploaded<br/>working-hours CSV"]
+    SQL["Azure SQL Database<br/>Depots · Vehicles · Drivers · Deliveries"]
+    UPLOAD["Employee-uploaded<br/>working-hours CSV"]
     ADF["Azure Data Factory"]
-    LAKE["ADLS Gen2<br/>Landing"]
+    ADLS["ADLS Gen2<br/>Landing"]
     BRONZE["Bronze<br/>Auto Loader + Delta"]
     SILVER["Silver<br/>Quality + CDC"]
-    GOLD["Gold<br/>3 reporting datasets"]
+    GOLD["Gold<br/>Performance datasets"]
     BI["Databricks SQL / BI"]
 
     SQL --> ADF
-    FILES --> ADF
-    ADF --> LAKE
-    LAKE --> BRONZE --> SILVER --> GOLD --> BI
+    UPLOAD --> ADF
+    ADF --> ADLS
+    ADLS --> BRONZE
+    BRONZE --> SILVER
+    SILVER --> GOLD
+    GOLD --> BI
 ```
 
-### Data flow
+**Two ingestion paths**
+- **Azure SQL:** ADF extracts changed records from four operational tables using per-table watermarks.
+- **Employee files:** ADF moves uploaded driver working-hours CSV files from a separate Blob Storage container into ADLS Gen2.
 
--   **Azure SQL path:** ADF extracts changed rows from `depots`,
-    `vehicles`, `drivers` and `deliveries` using per-table watermarks.
--   **Employee-file path:** ADF moves uploaded driver working-hours CSV
-    files from a separate Blob Storage container into ADLS Gen2.
--   **Databricks:** Auto Loader incrementally discovers landed files and
-    writes Bronze Delta tables.
--   **Silver:** validates, deduplicates, quarantines invalid records and
-    applies Auto CDC where configured.
--   **Gold:** publishes three separate performance datasets for
-    reporting.
+**Processing flow**
+- Auto Loader incrementally ingests landed files into Bronze Delta tables.
+- Silver applies data quality rules, deduplication, quarantine and configured CDC processing.
+- Three independent Gold pipelines publish datasets for delivery, depot and driver performance.
 
-------------------------------------------------------------------------
+---
 
-## Azure Data Factory
+## 1. Azure Data Factory
 
 ### Incremental Azure SQL ingestion
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/adf/incremental_ingestion_pipeline.png" alt="ADF incremental ingestion pipeline overview">`{=html}
-```{=html}
-<figcaption>
-```
-`<strong>`{=html}ADF pipeline:`</strong>`{=html} four independent
-source-table branches use a common watermark-based ingestion pattern.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
-The pipeline `pl_ingest_azure_sql_to_adls_global_logistics_dev` applies
-the following pattern to each Azure SQL source table:
+![ADF incremental ingestion pipeline](screenshots/adf/incremental_ingestion_pipeline.png)
 
-1.  Read the existing watermark from ADLS Gen2.
-2.  Query the source for records modified after that watermark.
-3.  Write the extracted records to a timestamped CSV file.
-4.  Look up the maximum modification timestamp for the extracted range.
-5.  Update the watermark only when a new maximum timestamp is available.
+*Four source-table branches use the same watermark-based ingestion pattern.*
 
-**Deliveries example --- incremental query**
+**Pipeline:** `pl_ingest_azure_sql_to_adls_global_logistics_dev`
 
-``` sql
+For each source table, the pipeline:
+
+1. Reads the existing watermark from ADLS Gen2.
+2. Extracts rows modified after that watermark.
+3. Writes the extracted records to a timestamped CSV file.
+4. Looks up the maximum modification timestamp.
+5. Updates the watermark only when a new maximum timestamp is available.
+
+**Example: deliveries source query**
+
+```sql
 SELECT *
 FROM dbo.deliveries
 WHERE modified_date > '@{activity('lookup_deliveries_watermark').output.firstRow.Prop_0}'
 ```
 
-**Dynamic output filename**
+**Timestamped output filename**
 
-``` text
+```text
 @concat('deliveries_', formatDateTime(utcNow(), 'yyyyMMdd_HHmmss'), '.csv')
 ```
 
-**Conditional watermark update**
+**Watermark update condition**
 
-``` text
+```text
 @not(empty(activity('lookup_max_deliveries_watermark').output.firstRow.max_modified_date))
 ```
 
-### ADF implementation evidence
+### ADF configuration evidence
 
-  ---------------------------------------------------------------------------
-  Screenshot                              What it demonstrates
-  --------------------------------------- -----------------------------------
-  `incremental_ingestion_pipeline.png`    Four source branches in the ADF
-                                          pipeline
+| Screenshot | Evidence |
+|---|---|
+| ![Watermark lookup](screenshots/adf/watermark_lookup_settings.png) | Read the current watermark |
+| ![Watermark dataset](screenshots/adf/watermark_dataset_configuration.png) | ADLS watermark file configuration |
+| ![Copy activity](screenshots/adf/deliveries_copy_activity.png) | Deliveries Copy Data activity |
+| ![Copy source](screenshots/adf/deliveries_copy_source_settings.png) | SQL query-based extraction |
+| ![Copy sink](screenshots/adf/deliveries_copy_sink_settings.png) | CSV sink configuration |
+| ![File naming](screenshots/adf/deliveries_copy_file_naming.png) | Dynamic timestamped file name |
+| ![Maximum watermark](screenshots/adf/max_watermark_lookup.png) | Retrieve maximum source timestamp |
+| ![If condition](screenshots/adf/watermark_if_condition.png) | Check before updating watermark |
+| ![Watermark update](screenshots/adf/watermark_update_copy_activity.png) | Watermark update activity |
 
-  `watermark_lookup_settings.png`         Reading the current watermark
+### Employee working-hours files
 
-  `deliveries_copy_source_settings.png`   SQL query-based source extraction
+- Separate employee-upload Blob Storage input.
+- ADF activity: `copy_driver_working_hours_to_adls`.
+- Copy behaviour: **Merge files**.
+- The landed CSV is ingested by the Bronze working-hours notebook.
 
-  `deliveries_copy_sink_settings.png`     CSV sink configuration
+---
 
-  `deliveries_copy_file_naming.png`       Timestamped output filename
+## 2. ADLS Gen2
 
-  `max_watermark_lookup.png`              Retrieving the maximum source
-                                          timestamp
+**Storage account:** `stgloballogisticsdev`
 
-  `watermark_if_condition.png`            Guarding the watermark update
-
-  `watermark_update_copy_activity.png`    Watermark update activity
-  ---------------------------------------------------------------------------
-
-### Employee working-hours ingestion
-
--   Separate employee-upload Blob Storage input.
--   ADF Copy Data activity: `copy_driver_working_hours_to_adls`.
--   Sink copy behaviour: **Merge files**.
--   Landed CSV files are subsequently ingested by the Bronze
-    working-hours notebook.
-
-------------------------------------------------------------------------
-
-## ADLS Gen2
-
-Storage account: `stgloballogisticsdev`
-
-Containers: - `landing` --- source extracts, employee files and
-watermark files. - `databricks` --- Databricks-related storage
-locations.
+| Container | Purpose |
+|---|---|
+| `landing` | Source extracts, employee files and watermark files |
+| `databricks` | Databricks-related storage locations |
 
 Key landing paths:
 
-``` text
+```text
 landing/
 ├── azure_sql/
 │   └── deliveries/
@@ -188,250 +155,135 @@ landing/
     └── vehicles_watermark.txt
 ```
 
-------------------------------------------------------------------------
+---
 
-## Databricks lakehouse
+## 3. Databricks lakehouse
 
-Unity Catalog separates the environments:
+Unity Catalog provides separate development and production catalogs.
 
-  Environment   Catalog            Schemas
-  ------------- ------------------ ----------------------------
-  Development   `logistics_dev`    `bronze`, `silver`, `gold`
-  Production    `logistics_prod`   `bronze`, `silver`, `gold`
+| Environment | Catalog | Schemas |
+|---|---|---|
+| DEV | `logistics_dev` | `bronze`, `silver`, `gold` |
+| PROD | `logistics_prod` | `bronze`, `silver`, `gold` |
 
-### Bronze --- incremental file ingestion
+### Bronze — incremental ingestion
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/databricks/bronze_ingestion_job.png" alt="Bronze ingestion job">`{=html}
-```{=html}
-<figcaption>
-```
-`<strong>`{=html}Bronze ingestion job:`</strong>`{=html} five
-independent ingestion tasks, managed through Databricks Asset Bundles.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
-Five ingestion notebooks:
+![Bronze ingestion job](screenshots/databricks/bronze_ingestion_job.png)
 
--   `ingest_deliveries`
--   `ingest_depots`
--   `ingest_drivers`
--   `ingest_vehicles`
--   `ingest_driver_working_hours`
+*Five ingestion tasks are managed through Databricks Asset Bundles.*
 
-Implementation highlights:
+**Ingestion notebooks**
+- `ingest_deliveries`
+- `ingest_depots`
+- `ingest_drivers`
+- `ingest_vehicles`
+- `ingest_driver_working_hours`
 
--   Shared helper: `src/05_utils/bronze_ingestion.py`.
--   Databricks Auto Loader (`cloudFiles`) for incremental file
-    discovery.
--   Explicit schemas and schema tracking.
--   Checkpoints for incremental processing.
--   `schemaEvolutionMode = rescue` to retain unexpected data in
-    `_rescued_data`.
--   Ingestion metadata, including `_ingestion_timestamp` and
-    `_metadata.file_path`.
--   `availableNow` trigger for bounded processing of newly available
-    files.
--   Delta tables as the Bronze storage format.
+**Implementation**
+- Shared ingestion helper: `src/05_utils/bronze_ingestion.py`.
+- Auto Loader (`cloudFiles`) for incremental file discovery.
+- Explicit schemas and schema tracking.
+- Checkpoints to track processed files.
+- Rescue mode for unexpected data in `_rescued_data`.
+- Ingestion metadata: `_ingestion_timestamp` and `_metadata.file_path`.
+- `availableNow` trigger for bounded processing.
+- Delta tables as the Bronze storage format.
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/databricks/bronze_run_history.png" alt="Bronze ingestion job run history">`{=html}
-```{=html}
-<figcaption>
-```
-Recorded Bronze job runs completed successfully.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
-### Silver --- quality, quarantine and CDC
+![Bronze run history](screenshots/databricks/bronze_run_history.png)
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/databricks/silver_table_results.png" alt="Silver pipeline table results">`{=html}
-```{=html}
-<figcaption>
-```
-`<strong>`{=html}Silver execution:`</strong>`{=html} validated, clean
-and quarantine outputs are visible in the pipeline results.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
-The Silver pipeline uses the Databricks Python pipelines API and
-materialized views.
+*Bronze job execution history showing successful runs.*
 
-**Processing capabilities**
+### Silver — data quality and CDC
 
--   Required-field validation using `@dp.expect` and `@dp.expect_all`.
--   Separate clean, validated and quarantine outputs.
--   Quarantine reason codes, including:
-    -   `MISSING_DEPOT_ID`
-    -   `MISSING_DEPOT_NAME`
-    -   `MISSING_CITY`
-    -   `MISSING_COUNTY`
-    -   `DUPLICATE_DEPOT_ID`
--   Deduplication using business keys and window functions.
--   Latest-record selection using `_ingestion_timestamp` and source-file
-    ordering.
--   Referential-integrity checks, including vehicle-to-depot validation.
--   Auto CDC / SCD Type 1 for applicable datasets, including deliveries
-    and driver working-hours data.
+![Silver pipeline overview](screenshots/databricks/silver_pipeline_overview.png)
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/databricks/silver_pipeline_overview.png" alt="Silver pipeline lineage overview">`{=html}
-```{=html}
-<figcaption>
-```
-Silver pipeline lineage and successful execution.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
-### Gold --- reporting datasets
+*Silver pipeline lineage across the source and transformed datasets.*
 
-Three independent Gold pipelines publish reporting-ready datasets. Each
-can be refreshed separately after Silver processing.
+**Processing**
+- Validation using `@dp.expect` and `@dp.expect_all`.
+- Separate clean, validated and quarantine outputs.
+- Deduplication using business keys and window functions.
+- Latest-record selection using ingestion timestamps and source-file ordering.
+- Referential-integrity checks, including vehicle-to-depot validation.
+- Auto CDC / SCD Type 1 for applicable datasets, including deliveries and driver working-hours data.
+
+**Example quarantine reason codes**
+- `MISSING_DEPOT_ID`
+- `MISSING_DEPOT_NAME`
+- `MISSING_CITY`
+- `MISSING_COUNTY`
+- `DUPLICATE_DEPOT_ID`
+
+![Silver table results](screenshots/databricks/silver_table_results.png)
+
+*Silver pipeline results show clean, validated and quarantine datasets.*
+
+### Gold — reporting datasets
+
+Three independent Gold pipelines publish reporting-ready materialized views. Each can be refreshed separately after Silver processing.
 
 #### Delivery performance
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/databricks/gold_delivery_performance.png" alt="Gold delivery performance lineage">`{=html}
-```{=html}
-<figcaption>
-```
-Delivery performance combines Silver deliveries, depots, drivers and
-vehicles.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
-`gold_delivery_performance`
+![Gold delivery performance lineage](screenshots/databricks/gold_delivery_performance.png)
 
--   Joins delivery records to depot, driver and vehicle information.
--   Derives delivery year, month, day and month-year reporting fields.
--   Creates success, failure, completed, delayed, in-transit and pending
-    flags.
--   Does not infer delivery duration from `modified_date`.
+**`gold_delivery_performance`**
+- Joins deliveries with depots, drivers and vehicles.
+- Derives delivery year, month, day and month-year fields.
+- Creates success, failure, completed, delayed, in-transit and pending flags.
+- Does not infer delivery duration from `modified_date`.
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/databricks/gold_delivery_performance_metrics.png" alt="Gold delivery performance output metrics">`{=html}
-```{=html}
-<figcaption>
-```
-Recorded output: 526 rows; incremental processing.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
+![Gold delivery performance metrics](screenshots/databricks/gold_delivery_performance_metrics.png)
+
+*Recorded output: 526 rows · Incremental processing.*
+
 #### Depot performance
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/databricks/gold_depot_performance.png" alt="Gold depot performance lineage and output">`{=html}
-```{=html}
-<figcaption>
-```
-`<strong>`{=html}`gold_depot_performance``</strong>`{=html} --- combines
-delivery, depot and driver working-hours information. Recorded output:
-55 rows.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
--   Monthly depot workload.
--   Delivery volumes by depot.
--   Delivery failure analysis.
+![Gold depot performance](screenshots/databricks/gold_depot_performance.png)
+
+**`gold_depot_performance`**
+- Monthly depot workload.
+- Delivery volumes by depot.
+- Delivery failure analysis.
+- Combines delivery, depot and driver working-hours information.
+
+*Recorded output: 55 rows.*
 
 #### Driver performance
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/databricks/gold_driver_performance.png" alt="Gold driver performance lineage and output">`{=html}
-```{=html}
-<figcaption>
-```
-`<strong>`{=html}`gold_driver_performance``</strong>`{=html} ---
-combines deliveries, driver working-hours and driver information.
-Recorded output: 290 rows.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
--   Driver-level operational reporting.
--   Delivery outcomes alongside working-hours information.
+![Gold driver performance](screenshots/databricks/gold_driver_performance.png)
 
-------------------------------------------------------------------------
+**`gold_driver_performance`**
+- Driver-level operational reporting.
+- Delivery outcomes alongside working-hours information.
+- Combines deliveries, drivers and driver working-hours data.
 
-## Databricks Asset Bundles and orchestration
+*Recorded output: 290 rows.*
 
-The bundle is named `global_logistics`. Resource definitions are
-maintained separately under `resources/` and included by
-`databricks.yml`.
+---
 
-### Environment configuration
+## 4. Deployment and orchestration
 
-  Configuration            DEV               PROD
-  ------------------------ ----------------- ------------------
-  Bundle target            `dev`             `prod`
-  Deployment mode          Development       Production
-  Catalog                  `logistics_dev`   `logistics_prod`
-  Orchestration schedule   Paused            Enabled
-  Default target           Yes               No
+The Databricks Asset Bundle is named `global_logistics`. Resource definitions are maintained in the `resources/` directory and included by `databricks.yml`.
 
-The catalog is passed into jobs and pipelines through `${var.catalog}`.
-The same source-controlled definitions can therefore be deployed to
-either catalog.
+### DEV and PROD targets
 
-### Orchestration workflow
+| Setting | DEV | PROD |
+|---|---|---|
+| Bundle target | `dev` | `prod` |
+| Deployment mode | Development | Production |
+| Unity Catalog | `logistics_dev` | `logistics_prod` |
+| Workflow schedule | Paused | Daily at 02:00 UTC |
+| Default target | Yes | No |
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/orchestration/dev_workflow_dependencies.png" alt="Development workflow dependencies">`{=html}
-```{=html}
-<figcaption>
-```
-DEV workflow dependency structure.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
-The workflow `global_logistics_full_workflow` contains five tasks:
+The `${var.catalog}` variable passes the selected catalog into the deployed jobs and pipelines.
 
-``` mermaid
+### End-to-end workflow
+
+![DEV workflow dependencies](screenshots/orchestration/dev_workflow_dependencies.png)
+
+The `global_logistics_full_workflow` contains five tasks:
+
+```mermaid
 flowchart TD
     A["bronze_ingestion"]
     B["silver_processing"]
@@ -445,129 +297,85 @@ flowchart TD
     B --> E
 ```
 
--   Bronze runs first.
--   Silver depends on successful Bronze completion.
--   All three Gold pipelines depend on Silver.
--   Gold tasks are independent of one another.
--   Production schedule: daily at **02:00 UTC**.
--   DEV schedule: paused.
+- Bronze runs first.
+- Silver depends on Bronze.
+- All three Gold pipelines depend on Silver.
+- Gold tasks run independently after Silver.
 
-### Production execution evidence
+![PROD workflow dependencies](screenshots/orchestration/prod_workflow_dependencies.png)
 
-```{=html}
-<figure>
-```
-`<img src="screenshots/orchestration/prod_workflow_run_history.png" alt="Production workflow run history">`{=html}
-```{=html}
-<figcaption>
-```
-Production workflow history showing successful end-to-end executions.
-```{=html}
-</figcaption>
-```
-```{=html}
-</figure>
-```
-The latest displayed production execution completed all five tasks
-successfully in **4 minutes 39 seconds**.
+*Production workflow configuration and task dependencies.*
 
-------------------------------------------------------------------------
+![PROD workflow run history](screenshots/orchestration/prod_workflow_run_history.png)
 
-## Deployment
+*The displayed production execution completed all five tasks successfully in 4 minutes 39 seconds.*
 
-### Prerequisites
+### Databricks CLI and bundle deployment
 
--   Azure Databricks workspace access.
--   Databricks CLI.
--   A configured authentication profile.
--   Access to the project's Azure resources and Unity Catalog catalogs.
+**CLI version:** `1.21.0`  
+**Authentication profile:** `LOGISTICS_DEV`
 
-The project was configured with **Databricks CLI v1.21.0** and the local
-profile `LOGISTICS_DEV`.
+Verify the CLI and authentication:
 
-### Verify the CLI and authentication
-
-``` powershell
+```powershell
 databricks --version
 databricks auth profiles
 databricks current-user me --profile LOGISTICS_DEV
 ```
 
-### Validate and deploy DEV
+Validate and deploy DEV:
 
-Run from the directory containing `databricks.yml`:
-
-``` powershell
+```powershell
 databricks bundle validate -t dev
 databricks bundle deploy -t dev
 ```
 
 Run the workflow:
 
-``` powershell
+```powershell
 databricks bundle run global_logistics_full_workflow -t dev
 ```
 
-### Validate and deploy PROD
+Validate and deploy PROD when performing a controlled production release:
 
-Production deployment is a controlled release operation:
-
-``` powershell
+```powershell
 databricks bundle validate -t prod
 databricks bundle deploy -t prod
 ```
 
-The production target uses `logistics_prod` and enables the daily
-orchestration schedule. Do not run production deployment commands as
-part of routine development testing.
+**Recorded DEV deployment result**
 
-### Recorded DEV deployment
+```text
+Validation OK!
 
-A successful DEV deployment reported:
-
-``` text
 Files: 4 uploaded, 10 deleted
 Resources: 0 created, 2 changed, 0 deleted, 4 unchanged
 ```
 
-The updated resources were the Gold driver-performance pipeline and the
-orchestration job.
+The updated resources were the Gold driver-performance pipeline and the orchestration job.
 
-------------------------------------------------------------------------
+---
 
-## Validation results
+## 5. Execution results
 
-  -----------------------------------------------------------------------
-  Component                           Recorded evidence
-  ----------------------------------- -----------------------------------
-  ADF incremental ingestion           Test run succeeded; 20 activities
-                                      succeeded
+| Component | Recorded result |
+|---|---|
+| ADF incremental ingestion | 20 activities succeeded |
+| Bronze | Successful job executions |
+| Silver | Completed run; 17 pipeline tables |
+| Gold delivery | 526 output rows |
+| Gold depot | 55 output rows |
+| Gold driver | 290 output rows |
+| PROD orchestration | Five tasks succeeded |
+| DEV bundle deployment | Validation and deployment succeeded |
 
-  Bronze                              Successful job executions
+*Row counts and durations are observations from recorded runs, not fixed expectations.*
 
-  Silver                              Completed pipeline run; 17 tables
-                                      in the pipeline
-
-  Gold delivery                       526 output rows
-
-  Gold depot                          55 output rows
-
-  Gold driver                         290 output rows
-
-  Production orchestration            All five tasks succeeded in the
-                                      latest displayed run
-
-  DAB DEV deployment                  Validation OK; deployment completed
-  -----------------------------------------------------------------------
-
-Output counts and execution durations are observations from recorded
-runs, not fixed expectations.
-
-------------------------------------------------------------------------
+---
 
 ## Repository structure
 
-``` text
+```text
 global_logistics/
 ├── databricks.yml
 ├── README.md
@@ -594,21 +402,13 @@ global_logistics/
     └── orchestration/
 ```
 
-------------------------------------------------------------------------
+## Security
 
-## Security notes
-
--   No PATs, passwords, connection strings or `.env` files belong in
-    source control.
--   Use the DEV catalog for development and the PROD catalog only for
-    controlled production deployment.
--   Keep personal workspace paths and account identifiers out of public
-    screenshots and documentation.
--   The project uses synthetic portfolio data.
-
-------------------------------------------------------------------------
+- Do not commit PATs, passwords, connection strings or `.env` files.
+- Use `logistics_dev` for development and reserve `logistics_prod` for controlled production deployments.
+- Remove personal identifiers and workspace-specific paths from public screenshots.
+- This portfolio project uses synthetic data.
 
 ## Repository
 
-[View the project on
-GitHub](https://github.com/MJRML/Irish-Global-Logistics-Azure-Data-Engineering-Databricks-Lakehouse-and-BI-Platform)
+[View the project on GitHub](https://github.com/MJRML/Irish-Global-Logistics-Azure-Data-Engineering-Databricks-Lakehouse-and-BI-Platform)
