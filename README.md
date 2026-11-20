@@ -3,7 +3,6 @@
 
 An end-to-end Azure data platform demonstrating incremental ingestion, a Databricks medallion lakehouse, data quality, change data capture, and deployment across development and production environments.
 
-
 **Focus:** End-to-end data engineering · **Architecture:** Lakehouse · **Cloud:** Microsoft Azure
 
 ---
@@ -72,6 +71,8 @@ flowchart LR
 
 **Pipeline:** `pl_ingest_azure_sql_to_adls_global_logistics_dev`
 
+The pipeline uses a watermark-based incremental loading pattern. Each source table maintains its own watermark in ADLS Gen2, allowing ADF to identify records modified since the previous extraction. This avoids repeatedly extracting the full source tables.
+
 For each source table, the pipeline:
 
 1. Reads the existing watermark from ADLS Gen2.
@@ -100,19 +101,39 @@ WHERE modified_date > '@{activity('lookup_deliveries_watermark').output.firstRow
 @not(empty(activity('lookup_max_deliveries_watermark').output.firstRow.max_modified_date))
 ```
 
-### ADF configuration evidence
+The pipeline uses a separate watermark for each source table. This means each branch can track its own progress and extract only records modified since its previous watermark, rather than repeatedly copying the full table.
 
-| Screenshot | Evidence |
-|---|---|
-| ![Watermark lookup](screenshots/adf/watermark_lookup_settings.png) | Read the current watermark |
-| ![Watermark dataset](screenshots/adf/watermark_dataset_configuration.png) | ADLS watermark file configuration |
-| ![Copy activity](screenshots/adf/deliveries_copy_activity.png) | Deliveries Copy Data activity |
-| ![Copy source](screenshots/adf/deliveries_copy_source_settings.png) | SQL query-based extraction |
-| ![Copy sink](screenshots/adf/deliveries_copy_sink_settings.png) | CSV sink configuration |
-| ![File naming](screenshots/adf/deliveries_copy_file_naming.png) | Dynamic timestamped file name |
-| ![Maximum watermark](screenshots/adf/max_watermark_lookup.png) | Retrieve maximum source timestamp |
-| ![If condition](screenshots/adf/watermark_if_condition.png) | Check before updating watermark |
-| ![Watermark update](screenshots/adf/watermark_update_copy_activity.png) | Watermark update activity |
+The watermark lookup reads the current value from ADLS Gen2 before the source query runs:
+
+![Watermark lookup settings](screenshots/adf/watermark_lookup_settings.png)
+
+*Lookup activity configured to read the existing watermark.*
+
+![Watermark dataset configuration](screenshots/adf/watermark_dataset_configuration.png)
+
+*Dataset configuration for the watermark file stored in ADLS Gen2.*
+
+The Copy activity uses the retrieved value in its SQL query and writes the changed records to a timestamped CSV file:
+
+![Deliveries Copy Data activity](screenshots/adf/deliveries_copy_activity.png)
+
+![Deliveries Copy source settings](screenshots/adf/deliveries_copy_source_settings.png)
+
+*The source query filters deliveries using the previous watermark.*
+
+![Deliveries Copy sink settings](screenshots/adf/deliveries_copy_sink_settings.png)
+
+![Deliveries output file naming](screenshots/adf/deliveries_copy_file_naming.png)
+
+*The sink writes CSV output using a timestamped filename.*
+
+After extraction, ADF retrieves the maximum modification timestamp from the source. The watermark is updated only when a new maximum value is returned, avoiding an update when the extraction has no newer records:
+
+![Maximum watermark lookup](screenshots/adf/max_watermark_lookup.png)
+
+![Watermark update condition](screenshots/adf/watermark_if_condition.png)
+
+![Watermark update Copy activity](screenshots/adf/watermark_update_copy_activity.png)
 
 ### Employee working-hours files
 
@@ -142,7 +163,7 @@ Driver working-hours data follows a separate file-based ingestion path. Employee
 
 ### ADF triggers
 
-The project uses two trigger types to start its ingestion pipelines:
+Azure Data Factory has two configured trigger types for the ingestion paths. These triggers are separate from the Databricks workflow schedule described later: ADF initiates source ingestion, while Databricks orchestration runs the lakehouse processing workflow.
 
 **Azure SQL — schedule trigger**
 
@@ -154,7 +175,7 @@ The project uses two trigger types to start its ingestion pipelines:
 
 **Employee uploads — Blob events trigger**
 
-`trg_employee_file_upload` is a `BlobEventsTrigger` configured through the Azure subscription. This provides an event-driven entry point for the employee file-upload pipeline, rather than relying on a polling schedule.
+`trg_employee_file_upload` is a `BlobEventsTrigger` configured through the Azure subscription. It provides an event-driven entry point for the employee file-upload pipeline, so the ingestion path can respond to Blob Storage events rather than relying on a polling schedule.
 
 ![Employee Blob event trigger](screenshots/adf/employee_blob_event_trigger.png)
 
@@ -165,6 +186,8 @@ The project uses two trigger types to start its ingestion pipelines:
 ## 2. ADLS Gen2
 
 **Storage account:** `stgloballogisticsdev`
+
+ADLS Gen2 is the central landing layer between ingestion and Databricks processing. It stores the Azure SQL extracts, employee-uploaded files and watermark files in separate paths. The Bronze pipelines use these landed files as their ingestion source.
 
 | Container | Purpose |
 |---|---|
@@ -201,6 +224,8 @@ Unity Catalog provides separate development and production catalogs.
 | PROD | `logistics_prod` | `bronze`, `silver`, `gold` |
 
 ### Bronze — incremental ingestion
+
+Bronze ingestion uses Databricks Auto Loader to incrementally discover new files arriving in ADLS Gen2. Checkpoints maintain processing state between runs, allowing ingestion to continue from previously processed files rather than starting again from the beginning.
 
 ![Bronze ingestion job](screenshots/databricks/bronze_ingestion_job.png)
 
@@ -438,12 +463,11 @@ global_logistics/
     └── orchestration/
 ```
 
-## Security
+## Security and configuration
 
-- Do not commit PATs, passwords, connection strings or `.env` files.
+- Keep PATs, passwords, connection strings and `.env` files out of source control.
 - Use `logistics_dev` for development and reserve `logistics_prod` for controlled production deployments.
 - Remove personal identifiers and workspace-specific paths from public screenshots.
-- This portfolio project uses synthetic data.
 
 ## Repository
 
