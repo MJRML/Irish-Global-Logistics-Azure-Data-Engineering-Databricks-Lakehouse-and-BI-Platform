@@ -467,7 +467,6 @@ global_logistics/
 
 - Keep PATs, passwords, connection strings and `.env` files out of source control.
 - Use `logistics_dev` for development and reserve `logistics_prod` for controlled production deployments.
-- Remove personal identifiers and workspace-specific paths from public screenshots.
 
 ## Repository
 
