@@ -30,27 +30,7 @@ The aim was to build a practical end-to-end engineering solution: ingest data in
 
 ## Architecture
 
-![Global Logistics end-to-end architecture](screenshots/architecture/global_logistics_architecture.png)
-
-```mermaid
-flowchart LR
-    SQL["Azure SQL Database<br/>Depots · Vehicles · Drivers · Deliveries"]
-    UPLOAD["Employee-uploaded<br/>working-hours CSV"]
-    ADF["Azure Data Factory"]
-    ADLS["ADLS Gen2<br/>Landing"]
-    BRONZE["Bronze<br/>Auto Loader + Delta"]
-    SILVER["Silver<br/>Quality + CDC"]
-    GOLD["Gold<br/>Performance datasets"]
-    BI["Databricks SQL / BI"]
-
-    SQL --> ADF
-    UPLOAD --> ADF
-    ADF --> ADLS
-    ADLS --> BRONZE
-    BRONZE --> SILVER
-    SILVER --> GOLD
-    GOLD --> BI
-```
+![Global Logistics end-to-end architecture](screenshots/architecture/global_logistics_architecture.png)  
 
 **Two ingestion paths**
 - **Azure SQL:** ADF extracts changed records from four operational tables using per-table watermarks.
