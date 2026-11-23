@@ -8,10 +8,6 @@ from pyspark.sql.window import Window
 catalog = spark.conf.get("global_logistics.catalog")
 
 
-# ---------------------------------------------------------------------------
-# DEPOTS
-# ---------------------------------------------------------------------------
-
 # Apply basic required-field checks to the Bronze depot records. The
 # expectations record data-quality results while the view remains available
 # for the downstream quarantine and clean-table logic.
@@ -112,10 +108,6 @@ def silver_depots():
              F.to_date("created_date")
         )
     )
-
-# ---------------------------------------------------------------------------
-# VEHICLES
-# ---------------------------------------------------------------------------
 
 @dp.materialized_view(
     name="vehicles_validated",
@@ -229,10 +221,6 @@ def silver_vehicles():
         .drop("row_num")
         .withColumn("created_date", F.to_date("created_date"))
     )
-
-# ---------------------------------------------------------------------------
-# DRIVERS
-# ---------------------------------------------------------------------------
 
 @dp.materialized_view(
     name="drivers_validated",
@@ -393,10 +381,6 @@ def silver_drivers():
         .drop("driver_row_num", "licence_count")
         .withColumn("created_date", F.to_date("created_date"))
     )
-
-# ---------------------------------------------------------------------------
-# DELIVERIES
-# ---------------------------------------------------------------------------
 
 # Deliveries are processed as a stream because new and changed delivery
 # records can arrive incrementally after the initial load.
@@ -589,10 +573,6 @@ dp.create_auto_cdc_flow(
     stored_as_scd_type=1
 )
 
-
-# ---------------------------------------------------------------------------
-# DRIVER WORKING HOURS
-# ---------------------------------------------------------------------------
 
 # Working-hour records are streamed so newly uploaded shift files can be
 # processed incrementally.
