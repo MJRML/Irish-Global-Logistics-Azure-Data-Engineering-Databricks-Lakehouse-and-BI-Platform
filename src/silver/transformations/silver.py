@@ -3,9 +3,18 @@ from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-# Read Bronze from the catalog configured by the Silver pipeline in databricks.yml.
+# Resolve the catalog from the pipeline configuration so the same code can
+# run against the development or production catalog without hard-coded names.
 catalog = spark.conf.get("global_logistics.catalog")
 
+
+# ---------------------------------------------------------------------------
+# DEPOTS
+# ---------------------------------------------------------------------------
+
+# Apply basic required-field checks to the Bronze depot records. The
+# expectations record data-quality results while the view remains available
+# for the downstream quarantine and clean-table logic.
 @dp.materialized_view(
     name="depots_validated",
     comment="Depot records checked for data quality"
@@ -30,6 +39,8 @@ def depots_quarantine():
 
     df = spark.read.table("depots_validated")
 
+    # Rank records for each depot so the most recently ingested version can
+    # be retained and older versions can be identified as duplicates.
     window_spec = (
         Window
         .partitionBy("depot_id")
@@ -75,6 +86,7 @@ def silver_depots():
 
     df = spark.read.table("depots_validated")
 
+    # Keep the latest valid record for each depot and standardise the date.
     window_spec = (
         Window
         .partitionBy("depot_id")
@@ -101,6 +113,10 @@ def silver_depots():
         )
     )
 
+# ---------------------------------------------------------------------------
+# VEHICLES
+# ---------------------------------------------------------------------------
+
 @dp.materialized_view(
     name="vehicles_validated",
     comment="Vehicle records checked for data quality"
@@ -126,7 +142,8 @@ def vehicles_quarantine():
 
     df = spark.read.table("vehicles_validated")
 
-    # Check each vehicle references an existing depot
+    # Check each vehicle references an existing depot. The marker column
+    # makes it possible to distinguish a missing reference after the join.
     depots = (
         spark.read.table("depots")
         .select("depot_id")
@@ -213,6 +230,10 @@ def silver_vehicles():
         .withColumn("created_date", F.to_date("created_date"))
     )
 
+# ---------------------------------------------------------------------------
+# DRIVERS
+# ---------------------------------------------------------------------------
+
 @dp.materialized_view(
     name="drivers_validated",
     comment="Driver records checked for data quality"
@@ -263,7 +284,9 @@ def drivers_quarantine():
         F.row_number().over(driver_window)
     )
 
-    # Check licence uniqueness across latest driver records only
+    # Check licence uniqueness across the latest version of each driver.
+    # This avoids treating an older version of the same driver's record as
+    # a separate licence holder.
     latest_drivers = (
         df
         .filter(F.col("driver_row_num") == 1)
@@ -273,7 +296,8 @@ def drivers_quarantine():
         )
     )
 
-    # Identify every driver involved in a licence conflict
+    # Mark every driver involved in a licence conflict so none of the
+    # conflicting records is silently selected as valid.
     licence_conflicts = (
         latest_drivers
         .filter(F.col("licence_count") > 1)
@@ -370,6 +394,12 @@ def silver_drivers():
         .withColumn("created_date", F.to_date("created_date"))
     )
 
+# ---------------------------------------------------------------------------
+# DELIVERIES
+# ---------------------------------------------------------------------------
+
+# Deliveries are processed as a stream because new and changed delivery
+# records can arrive incrementally after the initial load.
 @dp.table(
     name="deliveries_validated",
     comment="Delivery records checked for data quality"
@@ -411,7 +441,8 @@ def deliveries_quarantine():
 
     df = spark.readStream.table("deliveries_validated")
 
-    # Prepare reference datasets
+    # Prepare small reference datasets with marker columns. A missing marker
+    # after a left join indicates that the referenced entity does not exist.
     vehicles = (
         spark.read.table("vehicles")
         .select("vehicle_id")
@@ -515,7 +546,8 @@ def deliveries_clean():
         (F.trim(F.col("delivery_county")) != "")
     )
 
-    # Keep only deliveries with valid reference IDs
+    # Inner joins retain only deliveries whose vehicle, driver and depot
+    # identifiers resolve to records in the corresponding Silver tables.
     df = df.join(
         spark.read.table("vehicles").select("vehicle_id"),
         on="vehicle_id",
@@ -536,13 +568,16 @@ def deliveries_clean():
 
     return df
 
-# Create the target streaming table
+# Create the target streaming table that will hold the current Silver
+# version of each delivery.
 dp.create_streaming_table(
     name="deliveries",
     comment="Clean deliveries with the latest version retained"
 )
 
-# Apply incremental changes to the Silver table
+# Apply incoming changes incrementally. The delivery ID is the business key;
+# the sequence columns determine which incoming version is considered latest.
+# SCD Type 1 keeps the latest version rather than preserving history.
 dp.create_auto_cdc_flow(
     target="deliveries",
     source="deliveries_clean",
@@ -555,6 +590,12 @@ dp.create_auto_cdc_flow(
 )
 
 
+# ---------------------------------------------------------------------------
+# DRIVER WORKING HOURS
+# ---------------------------------------------------------------------------
+
+# Working-hour records are streamed so newly uploaded shift files can be
+# processed incrementally.
 @dp.table(
     name="driver_working_hours_validated",
     comment="Driver working hours records checked for data quality"
@@ -599,7 +640,7 @@ def driver_working_hours_quarantine():
         .withColumn("_depot_exists", F.lit(True))
     )
 
-    # Check driver and depot references
+    # A shift is valid only when both its driver and depot exist in Silver.
     df = df.join(drivers, on="driver_id", how="left")
     df = df.join(depots, on="depot_id", how="left")
 
@@ -685,13 +726,14 @@ def driver_working_hours_clean():
 
     return df
 
-# Create the target streaming table
+# Create the target streaming table for the latest version of each shift.
 dp.create_streaming_table(
     name="driver_working_hours",
     comment="Clean driver working hours with the latest shift version retained"
 )
 
-# Apply incremental changes to the Silver table
+# Use shift_id as the business key and ingestion metadata to order updates.
+# SCD Type 1 retains the latest version of each shift in the target table.
 dp.create_auto_cdc_flow(
     target="driver_working_hours",
     source="driver_working_hours_clean",
