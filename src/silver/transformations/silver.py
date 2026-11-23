@@ -3,6 +3,9 @@ from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
+# Read Bronze from the catalog configured by the Silver pipeline in databricks.yml.
+catalog = spark.conf.get("global_logistics.catalog")
+
 @dp.materialized_view(
     name="depots_validated",
     comment="Depot records checked for data quality"
@@ -17,7 +20,7 @@ from pyspark.sql.window import Window
 
 def depots_validated():
 
-    return spark.read.table("logistics_dev.bronze.depots")
+    return spark.read.table(f"{catalog}.bronze.depots")
   
 @dp.materialized_view(
     name="depots_quarantine",
@@ -113,7 +116,7 @@ def silver_depots():
 
 def vehicles_validated():
 
-    return spark.read.table("logistics_dev.bronze.vehicles")
+    return spark.read.table(f"{catalog}.bronze.vehicles")
 
 @dp.materialized_view(
     name="vehicles_quarantine",
@@ -226,7 +229,7 @@ def silver_vehicles():
 
 def drivers_validated():
 
-    return spark.read.table("logistics_dev.bronze.drivers")
+    return spark.read.table(f"{catalog}.bronze.drivers")
 
 @dp.materialized_view(
     name="drivers_quarantine",
@@ -396,7 +399,7 @@ def silver_drivers():
 def deliveries_validated():
 
     return spark.readStream.table(
-        "logistics_dev.bronze.deliveries"
+        f"{catalog}.bronze.deliveries"
     )
 
 
@@ -570,7 +573,7 @@ dp.create_auto_cdc_flow(
 def driver_working_hours_validated():
 
     return spark.readStream.table(
-        "logistics_dev.bronze.driver_working_hours"
+        f"{catalog}.bronze.driver_working_hours"
     )
 
 
